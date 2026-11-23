@@ -1,0 +1,4 @@
+.foamnest/
+.venv/
+__pycache__/
+*.pyc
