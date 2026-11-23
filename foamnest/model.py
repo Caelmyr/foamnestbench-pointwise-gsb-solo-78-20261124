@@ -17,6 +17,9 @@ MARKS = {
     "inspect": "Inspection patch",
     "label": "Label search area",
     "bridge": "Foam bridge patch",
+    "bearing-zone": "Load-bearing zone",
+    "keepout": "Thin-lip keep-out",
+    "trial-pad": "Trial pad outline",
 }
 READINGS = {
     "outline": ("Object outline", "Find and measure the visible object footprint in its search area."),
@@ -31,6 +34,8 @@ READINGS = {
     "bearing-change": ("Bearing change after reseating", "Measure where the contact footprint persists, is gained or is lost."),
     "label-window": ("Label window", "Find the largest rectangular clear patch for an identification label."),
     "liner-bridges": ("Liner bridges", "Check how narrow passages in a visible foam outline separate under edge wear."),
+    "pad-trial": ("Trial pad selection", "Score two trial pads against the load-bearing zone, thin-lip keep-out and lift line, then recommend one to adopt."),
+    "lift-access-pad": ("Lift access with adopted pad", "Re-read the lift line with a trial pad placed and classify the first stop as trial pad, original-photo block or missing evidence."),
 }
 POINT_MARKS = {"register", "lane", "gap"}
 IDENTITY = re.compile(r"^[0-9a-f]{24}$")

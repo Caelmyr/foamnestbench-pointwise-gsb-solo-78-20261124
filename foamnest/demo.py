@@ -23,6 +23,14 @@ LINES = (
     ("Entry from the left wall", "lane", [(108, 261), (504, 261)]),
     ("Across the grip channel", "gap", [(170, 256), (496, 256)]),
 )
+# Extra marks for the pad-selection workflow, drawn on the tray-face photograph only.
+FACE_LANE = ("Lift access with missing evidence", "lane", [(96, 220), (430, 220)])
+FACE_REGIONS = (
+    ("Load-bearing floor for pads", "bearing-zone", (200, 150, 470, 300)),
+    ("Thin lip that pads must not touch", "keepout", (92, 420, 210, 470)),
+    ("Trial pad A / wide bearing", "trial-pad", (210, 196, 360, 286)),
+    ("Trial pad B / deeper reach", "trial-pad", (400, 210, 470, 300)),
+)
 
 
 def normalized(points):
@@ -83,6 +91,7 @@ def photograph(role, shifts, seed):
         cv.drawMarker(rgba, point, (205, 179, 111, 255), markerSize=16, thickness=2, line_type=cv.LINE_AA)
     if role == "face":
         rgba[248:272, 345:369] = 0
+        rgba[200:230, 300:324] = 0
     if role == "reseated":
         rgba[318:357, 711:727] = 0
     cv.putText(rgba, "SYNTHETIC TRAY", (94, 553), cv.FONT_HERSHEY_SIMPLEX, .66,
@@ -102,6 +111,9 @@ def create(library):
         captures.append(capture)
         items = [(name, purpose, bounds(box)) for name, purpose, box in REGIONS]
         items.extend((name, purpose, normalized(points)) for name, purpose, points in LINES)
+        if role == "face":
+            items.extend((name, purpose, bounds(box)) for name, purpose, box in FACE_REGIONS)
+            items.append((FACE_LANE[0], FACE_LANE[1], normalized(FACE_LANE[2])))
         ox, oy = shifts
         matching = normalized([(x+ox+i % 2,y+oy) for i,(x,y) in enumerate(LANDMARKS)])
         items.append(("Corresponding fixture landmarks", "register", matching))

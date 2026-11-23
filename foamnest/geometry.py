@@ -31,13 +31,24 @@ class Transect:
     luma: np.ndarray
     known: np.ndarray
 
-    def classify(self, accepted, state):
-        categories = np.where(self.known, np.where(accepted, state, "blocked"), "unseen")
-        changes = np.flatnonzero(categories[1:] != categories[:-1]) + 1
+    def runs(self, states):
+        """Split the transect into segments using one state label per sample."""
+        labels = np.asarray(states)
+        changes = np.flatnonzero(labels[1:] != labels[:-1]) + 1
         transition = [(self.coordinate_mm[i-1] + self.coordinate_mm[i]) / 2 for i in changes]
         boundaries = [0, *transition, self.coordinate_mm[-1]]
-        return [Segment(float(first), float(last), categories[index])
+        return [Segment(float(first), float(last), labels[index])
                 for first, last, index in zip(boundaries[:-1], boundaries[1:], [0, *changes])]
+
+    def classify(self, accepted, state):
+        categories = np.where(self.known, np.where(accepted, state, "blocked"), "unseen")
+        return self.runs(categories)
+
+    def sample(self, mask):
+        """Resample a full-frame boolean mask at every transect position."""
+        maps = self.positions.T
+        args = (maps[0][None], maps[1][None], cv.INTER_NEAREST)
+        return cv.remap(mask.astype(np.uint8), *args)[0].astype(bool)
 
 
 def area(frame, mark, minimum=32):
@@ -67,12 +78,22 @@ def paint(shown, mask, color, opacity=.67):
 
 
 def mark_line(frame, transect, selected):
+    colors = np.where(np.asarray(selected)[:, None], (58, 213, 173), (247, 141, 94))
+    colors = np.where(transect.known[:, None], colors, np.array((175, 162, 227)))
+    return paint_line(frame, transect, colors)
+
+
+def paint_line(frame, transect, colors):
     shown = (255 * image(frame)).astype(np.uint8)
-    for point, known, passed in zip(transect.positions, transect.known, selected):
-        color = (58, 213, 173) if passed else (247, 141, 94)
-        if not known:
-            color = (175, 162, 227)
-        cv.circle(shown, tuple(np.rint(point).astype(int)), 2, color, -1, cv.LINE_AA)
+    for point, color in zip(transect.positions, colors):
+        cv.circle(shown, tuple(np.rint(point).astype(int)), 2, tuple(int(value) for value in color),
+                  -1, cv.LINE_AA)
+    return shown
+
+
+def draw_polygon(shown, mark, color, width=2):
+    vertices = np.rint(coordinates(mark["points"], shown.shape)).astype(np.int32)
+    cv.polylines(shown, [vertices], True, color, width, cv.LINE_AA)
     return shown
 
 

@@ -5,7 +5,7 @@ from flask import Blueprint, Response, jsonify, render_template, request, send_f
 
 from image_lab.validation import Conflict, Invalid
 
-from . import analysis, demo, evidence, photos
+from . import analysis, demo, evidence, photos, pads
 from .model import MARKS, READINGS, ROLES, choice, locate, mark_fields, obj, run_fields, text
 from .store import Library, identity, stamp
 
@@ -22,11 +22,16 @@ MEASUREMENTS = {
     "bearing-change": (analysis.bearing_change, {"region": "bearing"}, {}),
     "label-window": (analysis.label_window, {"region": "label"}, {}),
     "liner-bridges": (analysis.liner_bridges, {"region": "bridge"}, {}),
+    "pad-trial": (pads.pad_trial, {"line": "lane", "bearing_zone": "bearing-zone",
+                                   "keepout": "keepout", "pad_a": "trial-pad",
+                                   "pad_b": "trial-pad"}, {}),
+    "lift-access-pad": (pads.lift_access_pad, {"line": "lane", "pad": "trial-pad"}, {}),
 }
 PAIRED = {"landmark-offset", "paired-coverage", "bearing-change"}
 OPTIONS = {
     "outline": {"luma": ["Object brightness threshold", .53, .01]},
     "lift-access": {"obstacle_luma": ["Dark stop threshold", .31, .01]},
+    "lift-access-pad": {"obstacle_luma": ["Dark stop threshold", .31, .01]},
     "bearing": {"red_excess": ["Contact red excess", .19, .01]},
     "gap-section": {"floor_luma": ["Bright floor threshold", .61, .01]},
     "rub-marks": {"contrast": ["Local contrast", .075, .005]},
@@ -34,6 +39,8 @@ OPTIONS = {
     "label-window": {"floor_luma": ["Clear label floor threshold", .55, .01]},
     "liner-bridges": {"foam_luma": ["Foam brightness threshold", .4, .01],
                        "wear_mm": ["Edge wear (mm)", 1.5, .1]},
+    "pad-trial": {"minimum_bearing_mm2": ["Minimum bearing coverage area (mm²)", 200, 1],
+                  "minimum_approach_mm": ["Minimum continuous approach from line head (mm)", 10, .1]},
 }
 
 def input_json():
@@ -72,6 +79,10 @@ def measure(library, run, data):
         summary, rows, pixels = work(source_frame, other_frame, selected, options)
     else:
         summary, rows, pixels = work(source_frame, selected, options)
+    if mode == "lift-access-pad":
+        summary = {"source_photo": source["title"], "trial_pad": selected["pad"]["title"], **summary}
+    elif mode == "pad-trial":
+        summary = {"source_photo": source["title"], **summary}
     return {
         "mode": mode, "title": READINGS[mode][0], "summary": summary, "rows": rows, "photos": used,
         "options": options, "marks": selected, "sheet_mm": [run["width_mm"], run["height_mm"]],
