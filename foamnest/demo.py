@@ -16,8 +16,16 @@ REGIONS = (
     ("Grain under the lip", "grain", (120, 402, 318, 473)),
     ("Rub marks on the left wall", "rub", (134, 178, 281, 286)),
     ("Shared inspection window", "inspect", (339, 120, 800, 428)),
-    ("Possible label positions", "label", (132, 299, 300, 398)),
     ("Foam pads and bridge", "bridge", (340, 423, 685, 515)),
+)
+# Two label candidate panels plus the old lettering and raised bump that rule out part of them.
+LABEL_CANDIDATES = (
+    ("Label candidate near the entry", "label", (96, 288, 318, 392)),
+    ("Label candidate by the lower wall", "label", (575, 300, 690, 500)),
+)
+KEEPOUTS = (
+    ("Old printed lettering", "keepout", ((252, 326), (296, 326), (296, 360), (252, 360))),
+    ("Raised locating bump", "keepout", ((652, 452), (684, 452), (684, 490), (652, 490))),
 )
 LINES = (
     ("Entry from the left wall", "lane", [(108, 261), (504, 261)]),
@@ -73,8 +81,13 @@ def photograph(role, shifts, seed):
         cv.circle(rgba, (wx,wy), radius, (214, 87, 73, 255), -1, cv.LINE_AA)
         cv.circle(rgba, (wx,wy), radius//2, (227, 108, 88, 255), -1, cv.LINE_AA)
 
-    cv.rectangle(rgba, (135, 306), (287, 389), (172, 187, 190, 255), -1)
-    cv.rectangle(rgba, (220, 325), (252, 368), (68, 80, 92, 255), -1)
+    # Two clear label candidate panels; dark old lettering and a raised bump are no-stick zones.
+    cv.rectangle(rgba, (96, 288), (318, 392), (172, 187, 190, 255), -1)
+    cv.rectangle(rgba, (252, 326), (296, 360), (68, 80, 92, 255), -1)
+    cv.putText(rgba, "OLD", (255, 350), cv.FONT_HERSHEY_SIMPLEX, .55, (44, 52, 60, 255), 2, cv.LINE_AA)
+    cv.rectangle(rgba, (575, 300), (690, 500), (176, 190, 192, 255), -1)
+    cv.circle(rgba, (668, 471), 16, (96, 108, 116, 255), -1, cv.LINE_AA)
+    cv.circle(rgba, (668, 471), 16, (150, 162, 168, 255), 2, cv.LINE_AA)
     cv.rectangle(rgba, (345, 438), (481, 496), (170, 171, 157, 255), -1)
     cv.rectangle(rgba, (527, 433), (667, 498), (170, 171, 157, 255), -1)
     cv.rectangle(rgba, (480, 464), (528, 471), (170, 171, 157, 255), -1)
@@ -101,6 +114,8 @@ def create(library):
                    "synthetic": True, "uploaded": stamp()}
         captures.append(capture)
         items = [(name, purpose, bounds(box)) for name, purpose, box in REGIONS]
+        items.extend((name, purpose, bounds(box)) for name, purpose, box in LABEL_CANDIDATES)
+        items.extend((name, purpose, normalized(points)) for name, purpose, points in KEEPOUTS)
         items.extend((name, purpose, normalized(points)) for name, purpose, points in LINES)
         ox, oy = shifts
         matching = normalized([(x+ox+i % 2,y+oy) for i,(x,y) in enumerate(LANDMARKS)])

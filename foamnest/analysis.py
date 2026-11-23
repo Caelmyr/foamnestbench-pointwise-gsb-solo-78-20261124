@@ -6,9 +6,9 @@ import numpy as np
 
 from image_lab.validation import Invalid
 
-from .geometry import area, components, footprint_rows, largest_rectangle, line, mark_line, paint
+from .geometry import area, components, footprint_rows, line, mark_line, paint
 from .model import number
-from .photos import coordinates, image
+from .photos import coordinates, image, region
 
 
 def rounded(values, digits=3):
@@ -194,25 +194,183 @@ def bearing_change(frame, other, marks, opts):
             "retained_contact_mm2": rows[0]["area_mm2"]}, rows, shown
 
 
+def _mask_union(frame, marks):
+    bitmap = np.zeros(frame.support.shape, dtype=bool)
+    for mark in marks:
+        bitmap |= region(frame, mark)
+    return bitmap
+
+
+def _free_windows(blocked, window):
+    """Upper-left (x, y) corners of window-sized boxes containing no blocked pixel."""
+    win_h, win_w = window
+    height, width = blocked.shape
+    if win_h > height or win_w > width:
+        return np.empty((0, 2), dtype=np.int32)
+    integral = cv.integral(blocked.astype(np.uint8))
+    totals = (integral[win_h:, win_w:] + integral[:-win_h, :-win_w]
+              - integral[win_h:, :-win_w] - integral[:-win_h, win_w:])
+    return np.argwhere(totals == 0)[:, ::-1].astype(np.int32)
+
+
+def _edge_margins(blocked, origin, window):
+    """Exact clear run in pixels outward from each side of an axis-aligned box."""
+    x, y = origin
+    win_w, win_h = window
+    height, width = blocked.shape
+
+    def run(points):
+        distance = 0
+        for px, py in points:
+            if not (0 <= px < width and 0 <= py < height) or blocked[py, px]:
+                break
+            distance += 1
+        return distance
+
+    left = run((x - k, y) for k in range(1, width + 1))
+    right = run((x + win_w - 1 + k, y) for k in range(1, width + 1))
+    top = run((x, y - k) for k in range(1, height + 1))
+    bottom = run((x, y + win_h - 1 + k) for k in range(1, height + 1))
+    return left, right, top, bottom
+
+
+def _nearest_window(windows, anchor):
+    ax, ay = anchor
+    distances = (windows[:, 0] - ax) ** 2 + (windows[:, 1] - ay) ** 2
+    return windows[int(np.argmin(distances))]
+
+
+def _label_option(frame, domain, blocked, size_mm, gap_mm, rotated):
+    """Best margin-maximising envelope placement for one orientation, or None."""
+    label_w_mm, label_h_mm = size_mm[::-1] if rotated else size_mm
+    sx, sy = frame.step
+    env_w = max(1, round((label_w_mm + 2 * gap_mm) / sx))
+    env_h = max(1, round((label_h_mm + 2 * gap_mm) / sy))
+    label_w = max(1, round(label_w_mm / sx))
+    label_h = max(1, round(label_h_mm / sy))
+    yy, xx = np.nonzero(domain)
+    anchor = (float(np.mean(xx)), float(np.mean(yy)))
+
+    if not _free_windows(blocked, (env_h, env_w)).size:
+        return None
+
+    # Grow an isotropic blocked-region erosion until the envelope no longer fits;
+    # the largest surviving radius is the widest even clear band available.
+    def survives(radius):
+        # Erode the clear region: blocked pixels carry value 1 with a blocked border.
+        kernel = np.ones((2 * radius + 1, 2 * radius + 1), np.uint8)
+        eroded = cv.erode((~blocked).astype(np.uint8), kernel,
+                          borderType=cv.BORDER_CONSTANT, borderValue=0).astype(bool)
+        return bool(_free_windows(~eroded, (env_h, env_w)).size)
+
+    low, high = 0, 1
+    while high < min(domain.shape) and survives(high):
+        low, high = high, high * 2
+    while low + 1 < high:
+        middle = (low + high) // 2
+        if survives(middle):
+            low = middle
+        else:
+            high = middle
+    kernel = np.ones((2 * low + 1, 2 * low + 1), np.uint8)
+    eroded = cv.erode((~blocked).astype(np.uint8), kernel,
+                      borderType=cv.BORDER_CONSTANT, borderValue=0).astype(bool)
+    ex, ey = _nearest_window(_free_windows(~eroded, (env_h, env_w)), anchor)
+    px_margins = _edge_margins(blocked, (ex, ey), (env_w, env_h))
+    margins = (px_margins[0] * sx, px_margins[1] * sx, px_margins[2] * sy, px_margins[3] * sy)
+    if min(margins) + 1e-9 < gap_mm:
+        return None
+    return {
+        "orientation": "rotated-90" if rotated else "drawer-facing",
+        "envelope_px": [int(ex), int(ey), int(ex + env_w), int(ey + env_h)],
+        "label_px": [int(ex), int(ey), int(ex + label_w), int(ey + label_h)],
+        "label_mm": [round(label_w_mm, 3), round(label_h_mm, 3)],
+        "margins_mm": {"left": round(float(margins[0]), 3), "right": round(float(margins[1]), 3),
+                       "top": round(float(margins[2]), 3), "bottom": round(float(margins[3]), 3)},
+        "minimum_margin_mm": round(float(min(margins)), 3),
+    }
+
+
 def label_window(frame, marks, opts):
-    _, visible = area(frame, marks["region"])
     threshold = number(opts.get("floor_luma", .55), "clear label floor threshold", .05, .95)
-    clear = visible & (frame.luma >= threshold)
-    yy, xx = np.nonzero(visible)
-    left, top, right, bottom = xx.min(), yy.min(), xx.max() + 1, yy.max() + 1
-    x0, y0, x1, y1 = largest_rectangle(clear[top:bottom, left:right])
+    label_w = number(opts.get("label_width_mm", 30), "label width", 5, 300)
+    label_h = number(opts.get("label_height_mm", 15), "label height", 5, 300)
+    gap = number(opts.get("gap_mm", 2), "required clear margin", 0, 50)
+    candidate_marks = marks["candidates"]
+    keepout = _mask_union(frame, marks.get("keepouts", []))
+
     shown = image(frame)
-    paint(shown, clear, (.22, .72, .74), .22)
-    chosen = np.zeros_like(clear)
-    chosen[top+y0:top+y1, left+x0:left+x1] = True
-    paint(shown, chosen, (.95, .66, .29), .74)
-    dims = [(x1 - x0) * frame.step[0], (y1 - y0) * frame.step[1]]
-    bounds = {"x_mm": round(float((left+x0)*frame.step[0]), 3),
-              "y_mm": round(float((top+y0)*frame.step[1]), 3),
-              "width_mm": round(float(dims[0]), 3), "height_mm": round(float(dims[1]), 3)}
-    summary = {"largest_label_area_mm2": round(square_mm(frame, chosen), 3),
-               "label_available": bool(chosen.any()), "label_dimensions_mm": rounded(dims)}
-    return summary, [bounds] if chosen.any() else [], shown
+    if keepout.any():
+        paint(shown, keepout, (.86, .31, .28), .55)
+    rows = []
+    per_candidate = []
+    for index, mark in enumerate(candidate_marks, 1):
+        domain, visible = area(frame, mark)
+        clear = visible & (frame.luma >= threshold) & ~keepout
+        blocked = ~clear
+        paint(shown, clear, (.22, .72, .74), .22)
+        options = [option for rotated in (False, True)
+                   if (option := _label_option(frame, domain, blocked, (label_w, label_h), gap, rotated))]
+        per_candidate.append({"index": index, "title": mark["title"], "options": options})
+        if options:
+            for option in options:
+                rows.append({"candidate": index, "candidate_title": mark["title"],
+                             "orientation": option["orientation"], "fits": "yes",
+                             "minimum_clear_margin_mm": option["minimum_margin_mm"],
+                             **{f"margin_{side}_mm": option["margins_mm"][side]
+                                for side in ("left", "right", "top", "bottom")}})
+        else:
+            rows.append({"candidate": index, "candidate_title": mark["title"],
+                         "orientation": "both", "fits": "no", "minimum_clear_margin_mm": 0})
+
+    facing = [(entry, next(o for o in entry["options"] if o["orientation"] == "drawer-facing"))
+              for entry in per_candidate
+              if any(o["orientation"] == "drawer-facing" for o in entry["options"])]
+    if facing:
+        entry, chosen = facing[0]
+        rationale = "drawer-facing placement reads straight on when the drawer is pulled out"
+    else:
+        rotated = [(entry, entry["options"][0]) for entry in per_candidate if entry["options"]]
+        if rotated:
+            entry, chosen = rotated[0]
+            rationale = "no drawer-facing placement keeps the required margin; the rotated 90° placement does"
+        else:
+            entry, chosen = None, None
+            rationale = "no candidate area fits the label and its required clear margin"
+
+    if chosen is None:
+        summary = {"label_placed": False, "chosen_candidate": None, "chosen_orientation": None,
+                   "minimum_clear_margin_mm": 0, "label_dimensions_mm": [label_w, label_h],
+                   "required_gap_mm": gap, "selection_rationale": rationale, "label_plan": None}
+        return summary, rows, shown
+
+    ex0, ey0, ex1, ey1 = chosen["envelope_px"]
+    lx0, ly0, lx1, ly1 = chosen["label_px"]
+    envelope = np.zeros(frame.support.shape, dtype=bool)
+    envelope[ey0:ey1, ex0:ex1] = True
+    label = np.zeros(frame.support.shape, dtype=bool)
+    label[ly0:ly1, lx0:lx1] = True
+    paint(shown, envelope & ~label, (.96, .83, .38), .45)
+    paint(shown, label, (.95, .66, .29), .82)
+    sx, sy = frame.step
+    corners_mm = [[round(lx0 * sx, 3), round(ly0 * sy, 3)],
+                  [round(lx1 * sx, 3), round(ly0 * sy, 3)],
+                  [round(lx1 * sx, 3), round(ly1 * sy, 3)],
+                  [round(lx0 * sx, 3), round(ly1 * sy, 3)]]
+    plan = {"candidate": entry["index"], "candidate_title": entry["title"],
+            "orientation": chosen["orientation"], "corners_mm": corners_mm,
+            "envelope_mm": [round(ex0 * sx, 3), round(ey0 * sy, 3),
+                            round(ex1 * sx, 3), round(ey1 * sy, 3)],
+            "label_mm": chosen["label_mm"], "gap_mm": gap,
+            "margins_mm": chosen["margins_mm"], "minimum_margin_mm": chosen["minimum_margin_mm"],
+            "reading_direction": [1, 0] if chosen["orientation"] == "drawer-facing" else [0, 1],
+            "tray_mm": [round(frame.rgb.shape[1] * sx, 3), round(frame.rgb.shape[0] * sy, 3)]}
+    summary = {"label_placed": True, "chosen_candidate": entry["index"],
+               "chosen_orientation": chosen["orientation"],
+               "minimum_clear_margin_mm": chosen["minimum_margin_mm"],
+               "label_dimensions_mm": [label_w, label_h], "required_gap_mm": gap,
+               "selection_rationale": rationale, "label_plan": plan}
+    return summary, rows, shown
 
 
 def liner_bridges(frame, marks, opts):

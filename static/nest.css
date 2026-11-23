@@ -94,6 +94,8 @@ th, td { text-align: left; border-bottom: 1px solid var(--rule); padding: 6px 8p
 th { position: sticky; top: 0; background: var(--tint); }
 .table-wrap { max-height: 240px; overflow: auto; border: 1px solid var(--rule); margin: 12px 0; }
 .result-actions { justify-content: flex-start; flex-wrap: wrap; }
+.proof-scale { max-width: 230px; }
+select[multiple] { padding: 4px; }
 @media (max-width: 1040px) {
   .desk { grid-template-columns: 185px minmax(0, 1fr); }
   .main-grid { grid-template-columns: minmax(0, 1fr); }

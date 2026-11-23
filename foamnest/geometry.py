@@ -95,27 +95,3 @@ def footprint_rows(frame, mask):
     rows = [{"component": i, **{key: value for key, value in part.items() if key != "label"}}
             for i, part in enumerate(pieces, 1)]
     return label, rows
-
-
-def largest_rectangle(mask):
-    """Return an inclusive-free rectangle as two exclusive raster bounds."""
-    width = mask.shape[1]
-    heights = np.zeros(width, dtype=int)
-    best = (0, 0, 0, 0)
-    best_area = 0
-    for bottom, row in enumerate(mask, 1):
-        heights = np.where(row, heights + 1, 0)
-        stack = []
-        for column in range(width + 1):
-            start = column
-            height = int(heights[column]) if column < width else 0
-            while stack and stack[-1][1] > height:
-                left, prior = stack.pop()
-                size = (column - left) * prior
-                candidate = (left, bottom - prior, column, bottom)
-                if size > best_area or (size == best_area and candidate < best):
-                    best_area, best = size, candidate
-                start = left
-            if height and (not stack or stack[-1][1] < height):
-                stack.append((start, height))
-    return best

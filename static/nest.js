@@ -165,6 +165,21 @@ function select(name, options) {
   return widget;
 }
 
+function multiSelect(name, options) {
+  const widget = element("select");
+  widget.name = name;
+  widget.multiple = true;
+  widget.size = Math.min(5, Math.max(3, options.length || 3));
+  for (const [value, label] of options) {
+    const option = element("option", label);
+    option.value = value;
+    widget.append(option);
+  }
+  return widget;
+}
+
+const LIST_FIELDS = new Set(["candidates", "keepouts"]);
+
 function grid(...fields) {
   const container = element("div");
   container.className = "field-grid";
@@ -393,11 +408,16 @@ function measurement() {
     if (spec.paired) fields.append(field("Comparison photograph", comparison));
     function addMarks(specification, photo) {
       for (const [key, type] of Object.entries(specification)) {
-        const entries = state.run.marks.filter((mark) => mark.purpose === type && mark.photo === photo);
-        const editor = select(key, entries.map((mark) => [mark.id, mark.title]));
+        const entries = state.run.marks.filter((mark) => mark.purpose === type && mark.photo === photo.id);
+        const editor = LIST_FIELDS.has(key)
+          ? multiSelect(key, entries.map((mark) => [mark.id, mark.title]))
+          : select(key, entries.map((mark) => [mark.id, mark.title]));
         editor.required = true;
         controls[key] = editor;
-        fields.append(field(displayName(key) + " / " + state.config.marks[type], editor));
+        const hint = LIST_FIELDS.has(key)
+          ? (key === "candidates" ? "hold Ctrl/Cmd to choose 1–2 candidates" : "hold Ctrl/Cmd to choose 0 or more no-stick zones")
+          : "";
+        fields.append(field(displayName(key) + " / " + state.config.marks[type] + (hint ? " — " + hint : ""), editor));
       }
     }
     addMarks(spec.reference, source.id);
@@ -415,11 +435,23 @@ function measurement() {
   open("Take reading", form("Save reading", async () => {
     const readingType = available[operation.value];
     if (readingType.paired && !comparison.value) throw new Error("Add a second calibrated photograph first.");
-    if (Object.values(controls).some((control) => !control.value)) throw new Error("Mark the required references first.");
+    const markPayload = {};
+    for (const [key, control] of Object.entries(controls)) {
+      if (LIST_FIELDS.has(key)) {
+        const chosen = [...control.selectedOptions].map((option) => option.value);
+        if (key === "candidates" && (chosen.length < 1 || chosen.length > 2)) {
+          throw new Error("Select one or two label candidate areas.");
+        }
+        markPayload[key] = chosen;
+      } else {
+        if (!control.value) throw new Error("Mark the required references first.");
+        markPayload[key] = control.value;
+      }
+    }
     const result = await api(runURL() + "/readings", "POST", {
       revision: state.run.revision, mode: operation.value, photo: source.id,
       other: comparison.value,
-      marks: Object.fromEntries(Object.entries(controls).map(([key, control]) => [key, control.value])),
+      marks: markPayload,
       options: Object.fromEntries(Object.entries(options).map(([key, control]) => [key, control.valueAsNumber])),
     });
     replaceRun(result.run);
@@ -457,12 +489,34 @@ function openReading(reading) {
   snapshot.src = url + "/overlay";
   const summary = element("dl");
   for (const [key, value] of Object.entries(reading.summary)) {
+    if (key === "label_plan") continue;
     summary.append(element("dt", displayName(key)), element("dd", display(value)));
   }
   hero.append(snapshot, summary);
   const links = element("div");
   links.className = "result-actions";
-  links.append(link("Download CSV", url + "/csv"), link("Download evidence packet", url + "/packet"));
+  links.append(link("Download CSV", url + "/csv"));
+  if (reading.mode === "label-window") {
+    const scale = input("px_per_mm", "number", 2, { min: .05, max: 50, step: .01, required: true });
+    scale.title = "Pixels per millimetre for the full-tray transparent proof";
+    const proofLink = link("Download evidence packet with transparent proof", "#");
+    const refresh = () => {
+      const value = Number.parseFloat(scale.value);
+      proofLink.href = Number.isFinite(value)
+        ? url + "/packet?px_per_mm=" + encodeURIComponent(value)
+        : url + "/packet";
+    };
+    scale.addEventListener("input", refresh);
+    refresh();
+    const scaleField = field("Proof scale (pixels per mm)", scale);
+    scaleField.classList.add("proof-scale");
+    links.append(scaleField, proofLink);
+    if (!reading.summary.label_placed) {
+      links.append(element("p", "No placement fits, so the packet omits the transparent label proof."));
+    }
+  } else {
+    links.append(link("Download evidence packet", url + "/packet"));
+  }
   pane.append(hero);
   if (reading.rows.length) pane.append(table(reading.rows));
   pane.append(links);

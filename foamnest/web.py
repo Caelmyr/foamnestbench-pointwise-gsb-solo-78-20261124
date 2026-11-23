@@ -20,10 +20,11 @@ MEASUREMENTS = {
     "liner-tone": (analysis.liner_tone, {"region": "inspect"}, {}),
     "paired-coverage": (analysis.paired_coverage, {"region": "inspect"}, {}),
     "bearing-change": (analysis.bearing_change, {"region": "bearing"}, {}),
-    "label-window": (analysis.label_window, {"region": "label"}, {}),
+    "label-window": (analysis.label_window, {"candidates": "label", "keepouts": "keepout"}, {}),
     "liner-bridges": (analysis.liner_bridges, {"region": "bridge"}, {}),
 }
 PAIRED = {"landmark-offset", "paired-coverage", "bearing-change"}
+LIST_SLOTS = {("label-window", "candidates"), ("label-window", "keepouts")}
 OPTIONS = {
     "outline": {"luma": ["Object brightness threshold", .53, .01]},
     "lift-access": {"obstacle_luma": ["Dark stop threshold", .31, .01]},
@@ -31,7 +32,10 @@ OPTIONS = {
     "gap-section": {"floor_luma": ["Bright floor threshold", .61, .01]},
     "rub-marks": {"contrast": ["Local contrast", .075, .005]},
     "bearing-change": {"red_excess": ["Contact red excess", .19, .01]},
-    "label-window": {"floor_luma": ["Clear label floor threshold", .55, .01]},
+    "label-window": {"floor_luma": ["Clear label floor threshold", .55, .01],
+                     "label_width_mm": ["Label width (mm)", 30, .1],
+                     "label_height_mm": ["Label height (mm)", 15, .1],
+                     "gap_mm": ["Required clear margin (mm)", 2, .1]},
     "liner-bridges": {"foam_luma": ["Foam brightness threshold", .4, .01],
                        "wear_mm": ["Edge wear (mm)", 1.5, .1]},
 }
@@ -55,6 +59,22 @@ def measure(library, run, data):
 
     def read_marks(assigned, capture):
         for slot, purpose in assigned.items():
+            if (mode, slot) in LIST_SLOTS:
+                values = marked.get(slot, [])
+                if values is None:
+                    values = []
+                if not isinstance(values, list):
+                    raise Invalid(f"Select {MARKS[purpose].lower()} marks from the photograph.")
+                limit = 2 if slot == "candidates" else 8
+                if slot == "candidates" and not values:
+                    raise Invalid("Select at least one label candidate area.")
+                if len(values) > limit:
+                    raise Invalid("Select at most two candidate areas and eight no-stick zones.")
+                picked = [locate(run["marks"], value, MARKS[purpose]) for value in values]
+                if any(mark["photo"] != capture["id"] or mark["purpose"] != purpose for mark in picked):
+                    raise Invalid(f"Select {MARKS[purpose].lower()} marks from the specified photograph.")
+                selected[slot] = picked
+                continue
             mark = locate(run["marks"], marked.get(slot), MARKS[purpose])
             if mark["photo"] != capture["id"] or mark["purpose"] != purpose:
                 raise Invalid(f"Select a {MARKS[purpose].lower()} mark from the specified photograph.")
@@ -219,7 +239,16 @@ def install(app, root):
     @api.get("/runs/<key>/readings/<reading_id>/packet")
     def reading_packet(key, reading_id):
         result = library.reading(library.run(key), reading_id)
-        return send_file(BytesIO(evidence.packet(library, result)), download_name="tray-reading.zip",
+        scale = None
+        if request.args.get("px_per_mm"):
+            try:
+                scale = float(request.args["px_per_mm"])
+            except (TypeError, ValueError) as error:
+                raise Invalid("Enter the proof scale in pixels per millimetre.") from error
+            if not .05 <= scale <= 50 or scale != scale:
+                raise Invalid("The proof scale must be between 0.05 and 50 pixels per millimetre.")
+        return send_file(BytesIO(evidence.packet(library, result, scale)),
+                         download_name="tray-reading.zip",
                          as_attachment=True, mimetype="application/zip")
 
     app.register_blueprint(api)

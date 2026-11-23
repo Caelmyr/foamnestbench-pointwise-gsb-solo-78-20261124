@@ -15,7 +15,8 @@ MARKS = {
     "register": "Matching tray landmarks",
     "rub": "Surface rub patch",
     "inspect": "Inspection patch",
-    "label": "Label search area",
+    "label": "Label candidate area",
+    "keepout": "Label no-stick zone",
     "bridge": "Foam bridge patch",
 }
 READINGS = {
@@ -29,7 +30,7 @@ READINGS = {
     "liner-tone": ("Liner tone", "Check color and variation in the visible liner."),
     "paired-coverage": ("Paired tray visibility", "Compare the physically visible areas of two registered photographs."),
     "bearing-change": ("Bearing change after reseating", "Measure where the contact footprint persists, is gained or is lost."),
-    "label-window": ("Label window", "Find the largest rectangular clear patch for an identification label."),
+    "label-window": ("Label window", "Fit a label and its clear margin inside candidate areas, steering around no-stick zones such as old lettering or raised bumps; choose between drawer-facing and rotated placement."),
     "liner-bridges": ("Liner bridges", "Check how narrow passages in a visible foam outline separate under edge wear."),
 }
 POINT_MARKS = {"register", "lane", "gap"}
