@@ -18,6 +18,10 @@ REGIONS = (
     ("Shared inspection window", "inspect", (339, 120, 800, 428)),
     ("Possible label positions", "label", (132, 299, 300, 398)),
     ("Foam pads and bridge", "bridge", (340, 423, 685, 515)),
+    ("Grain texture reference A", "grain_a", (146, 432, 184, 458)),
+    ("Grain texture reference B", "grain_b", (214, 432, 252, 458)),
+    ("Confirmed rub across the groove", "confirmed", (158, 232, 232, 240)),
+    ("Intact liner control patch", "intact", (140, 180, 275, 192)),
 )
 LINES = (
     ("Entry from the left wall", "lane", [(108, 261), (504, 261)]),
@@ -42,6 +46,12 @@ def photograph(role, shifts, seed):
     rgb = light[:, :, None] * np.array((53, 59, 69)) + noise[:, :, None]
     tray = (x >= 64) & (x < 830) & (y >= 62) & (y < 530)
     grain = 6 * np.cos((y - .31 * x) * (2 * math.pi / 6.9))
+    # Reference patch B sits on a noticeably sheared stretch of the liner, so
+    # the two circled texture references return materially different grain
+    # angles and the detector can demonstrate direction selection.
+    patch_b = (x >= 208) & (x < 258) & (y >= 426) & (y < 464)
+    phase = (y - .31 * x) + .22 * (x - 208)
+    grain[patch_b] = (6 * np.cos(phase * (2 * math.pi / 6.9)))[patch_b]
     rgb[tray] = np.array((78, 92, 104)) + (grain[tray]+noise[tray])[:, None]
     rgba = cv.cvtColor(np.clip(rgb, 0, 255).astype(np.uint8), cv.COLOR_RGB2RGBA)
     cv.rectangle(rgba, (64, 62), (830, 530), (159, 175, 184, 255), 4)
@@ -49,6 +59,18 @@ def photograph(role, shifts, seed):
 
     cv.rectangle(rgba, (108, 242), (390, 276), (178, 200, 203, 255), -1)
     cv.rectangle(rgba, (300, 243), (339, 274), (49, 51, 50, 255), -1)
+    # A confirmed scuff cut across the diagonal grooves: a short dark streak
+    # whose orientation is far from the grain line so along-grain filtering
+    # cannot absorb it into the periodic groove background.  Alpha is fully
+    # opaque: a real scuff is liner material, not a missing-capture hole.
+    cv.ellipse(rgba, (195, 236), (30, 7), -18, 0, 360, (22, 25, 28, 255), -1, cv.LINE_AA)
+    cv.ellipse(rgba, (195, 236), (20, 3), -18, 0, 360, (10, 12, 14, 255), -1, cv.LINE_AA)
+    # A shallow scuff crossing the missing-capture band: visible halves may not
+    # be joined into one mark across the unseen strip.
+    cv.ellipse(rgba, (206, 272), (26, 3), -12, 0, 360, (52, 56, 60, 255), -1, cv.LINE_AA)
+    cv.ellipse(rgba, (206, 284), (26, 2), -12, 0, 360, (52, 56, 60, 255), -1, cv.LINE_AA)
+    # Missing-capture band inside the rub window: marks must not bridge it.
+    cv.rectangle(rgba, (150, 278), (262, 283), (0, 0, 0, 0), -1)
     for points in (
         [(176,196),(208,198),(218,209),(202,216),(178,207)],
         [(240,207),(268,210),(272,224),(252,229),(244,219)],

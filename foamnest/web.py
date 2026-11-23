@@ -5,7 +5,7 @@ from flask import Blueprint, Response, jsonify, render_template, request, send_f
 
 from image_lab.validation import Conflict, Invalid
 
-from . import analysis, demo, evidence, photos
+from . import analysis, demo, evidence, grainmap, photos
 from .model import MARKS, READINGS, ROLES, choice, locate, mark_fields, obj, run_fields, text
 from .store import Library, identity, stamp
 
@@ -17,6 +17,9 @@ MEASUREMENTS = {
     "grain-direction": (analysis.grain_direction, {"region": "grain"}, {}),
     "landmark-offset": (analysis.landmark_offsets, {"reference": "register"}, {"comparison": "register"}),
     "rub-marks": (analysis.rub_marks, {"region": "rub"}, {}),
+    "grain-rub": (grainmap.grain_rub_map,
+                  {"region": "rub", "grain_a": "grain_a", "grain_b": "grain_b",
+                   "confirmed": "confirmed", "intact": "intact"}, {}),
     "liner-tone": (analysis.liner_tone, {"region": "inspect"}, {}),
     "paired-coverage": (analysis.paired_coverage, {"region": "inspect"}, {}),
     "bearing-change": (analysis.bearing_change, {"region": "bearing"}, {}),
@@ -30,6 +33,13 @@ OPTIONS = {
     "bearing": {"red_excess": ["Contact red excess", .19, .01]},
     "gap-section": {"floor_luma": ["Bright floor threshold", .61, .01]},
     "rub-marks": {"contrast": ["Local contrast", .075, .005]},
+    "grain-rub": {
+        "contrast": ["Dark residual vs groove baseline", .075, .005],
+        "gap_mm": ["Safety halo around missing capture (mm)", 2, .5],
+        "min_part_mm2": ["Smallest mark component (mm2)", .25, .05],
+        "keep_pct": ["Min retained confirmed-scuff area (%)", 70, 1],
+        "false_pct": ["Max false area on intact reference (%)", 5, .5],
+    },
     "bearing-change": {"red_excess": ["Contact red excess", .19, .01]},
     "label-window": {"floor_luma": ["Clear label floor threshold", .55, .01]},
     "liner-bridges": {"foam_luma": ["Foam brightness threshold", .4, .01],
